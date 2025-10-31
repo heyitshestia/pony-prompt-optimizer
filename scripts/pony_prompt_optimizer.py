@@ -92,8 +92,8 @@ IGNORE_WORDS: Set[str] = {
 
 SENTENCE_SPLIT_REGEX = re.compile(r"(?<=[.!?])\s+|\n+|[;]+")
 
-FEMALE_TERMS = ("female", "girl", "woman", "lady", "mare")
-MALE_TERMS = ("male", "boy", "man", "guy", "stallion")
+FEMALE_TERMS = ("female", "girl", "woman", "lady", "mare", "mares")
+MALE_TERMS = ("male", "boy", "man", "guy", "stallion", "stallions")
 
 AGE_RULES = {
     "young": ("young", "youthful", "teen", "teenage"),
@@ -431,7 +431,17 @@ PROP_PATTERNS = [
     (re.compile(r"\bwhite walls\b"), ("white_walls",)),
     (re.compile(r"\bpolaroid photo\b"), ("polaroid_photo",)),
     (re.compile(r"\bretro aesthetic\b"), ("retro_aesthetic",)),
+    (re.compile(r"\bfilm grain\b"), ("film_grain",)),
     (re.compile(r"\bbed\b"), ("bed",)),
+]
+
+ADJECTIVE_SUBJECT_PATTERNS = [
+    (re.compile(r"\bcute girl\b"), "cute_girl"),
+    (re.compile(r"\badorable girl\b"), "adorable_girl"),
+    (re.compile(r"\bpretty girl\b"), "pretty_girl"),
+    (re.compile(r"\bbeautiful girl\b"), "beautiful_girl"),
+    (re.compile(r"\bcute boy\b"), "cute_boy"),
+    (re.compile(r"\bhandsome boy\b"), "handsome_boy"),
 ]
 
 
@@ -568,6 +578,10 @@ def _enrich_attributes_with_freeform(text: str, attrs: Dict[str, Set[str]]) -> N
             wardrobe_set.add(clothing_tag)
             wardrobe_set.add(f"{color_tag}_{clothing_tag}")
             attrs.setdefault("color", set()).add(color_tag)
+
+    for pattern, combined in ADJECTIVE_SUBJECT_PATTERNS:
+        if pattern.search(lowered):
+            attrs.setdefault("traits", set()).add(combined)
 
 
 @dataclass
@@ -966,6 +980,7 @@ class PonyPromptConverter:
         priority_tags.extend(aggregated_attrs.get("lighting", set()))
         priority_tags.extend(aggregated_attrs.get("props", set()))
         priority_tags.extend(aggregated_attrs.get("color", set()))
+        priority_tags.extend(tag for tag in aggregated_attrs.get("traits", set()) if tag.endswith("_girl") or tag.endswith("_boy"))
 
         for tag in priority_tags:
             formatted = _format_tag(tag)
