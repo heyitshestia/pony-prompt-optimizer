@@ -1,5 +1,6 @@
 import random
 import re
+from collections import Counter
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Sequence, Set, Tuple
 
@@ -91,6 +92,8 @@ IGNORE_WORDS: Set[str] = {
     "break",
     "mcnm",
 }
+
+SENTENCE_SPLIT_REGEX = re.compile(r"(?<=[.!?])\s+|\n+|[;]+")
 
 FEMALE_TERMS = ("female", "girl", "woman", "lady", "mare")
 MALE_TERMS = ("male", "boy", "man", "guy", "stallion")
@@ -252,7 +255,7 @@ FLAIR_TAG_POOL: Dict[str, Sequence[str]] = {
 
 PRESET_RULES: Dict[str, Dict[str, Dict[str, float]]] = {
     "light": {
-        "subject": {"min": 2, "max": 3},
+        "subject": {"min": 1, "max": 3},
         "species": {"min": 0, "max": 1, "prob": 0.7},
         "traits": {"min": 0, "max": 1, "prob": 0.5},
         "body": {"min": 0, "max": 1, "prob": 0.5},
@@ -291,6 +294,19 @@ PRESET_RULES: Dict[str, Dict[str, Dict[str, float]]] = {
         "quality": {"min": 3, "max": 4},
     },
 }
+
+
+def _split_into_segments(text: str) -> List[str]:
+    segments = [
+        segment.strip()
+        for segment in SENTENCE_SPLIT_REGEX.split(text)
+        if segment and segment.strip()
+    ]
+    if segments:
+        return segments
+    cleaned = text.strip()
+    return [cleaned] if cleaned else []
+
 
 def _compile_keywords(values: Iterable[str]) -> Tuple[re.Pattern, ...]:
     return tuple(re.compile(rf"\b{re.escape(v)}\b", re.IGNORECASE) for v in values)
@@ -423,6 +439,28 @@ class PonyPromptConverter:
         if "serious" in text or "focused" in text:
             store.setdefault("traits", set()).add("serious")
 
+    def _collect_segment_attributes(
+        self,
+        normalized: str,
+    ) -> Tuple[Dict[str, Set[str]], int, str]:
+        attrs: Dict[str, Set[str]] = {}
+        subject_tags, count, gender = self._subject_tags(normalized)
+        if subject_tags:
+            attrs["subject"] = set(subject_tags)
+        for rules in (
+            SPECIES_RULES,
+            POSE_RULES,
+            SETTING_RULES,
+            WARDROBE_RULES,
+            LIGHTING_RULES,
+            MOOD_RULES,
+        ):
+            matches = _collect_rules(normalized, rules)
+            for category, tags in matches.items():
+                attrs.setdefault(category, set()).update(tags)
+        self._apply_descriptors(normalized, attrs)
+        return attrs, count, gender
+
     def _choose_adjectives(self, attrs: Dict[str, Set[str]], rng: random.Random, preset: str) -> List[str]:
         pool: List[str] = []
         for category in ("age", "body", "traits", "mood"):
@@ -476,8 +514,45 @@ class PonyPromptConverter:
                 result.append(rng.choice(options))
         return result[:2]
 
-    def _select_categories(self, attrs: Dict[str, Set[str]], preset: str, rng: random.Random) -> Dict[str, List[str]]:
+    def _build_subject_phrase(
+        self,
+        attrs: Dict[str, Set[str]],
+        count: int,
+        gender: str,
+        rng: random.Random,
+        preset: str,
+    ) -> str:
+        adjectives = self._choose_adjectives(attrs, rng, preset)
+        noun = self._base_noun(attrs, count, gender)
+        pose_phrase = self._phrase(POSE_PHRASES, attrs.get("pose", set()), rng)
+        setting_phrase = self._phrase(
+            SETTING_PHRASES,
+            attrs.get("setting", set()) | attrs.get("lighting", set()),
+            rng,
+        )
+        wardrobe_phrases = list(dict.fromkeys(self._wardrobe_phrase(attrs, rng)))
+        fragments: List[str] = []
+        if adjectives:
+            fragments.append(" ".join(adjectives))
+        fragments.append(noun)
+        if pose_phrase:
+            fragments.append(pose_phrase)
+        if setting_phrase:
+            fragments.append(setting_phrase)
+        if wardrobe_phrases:
+            fragments.append(", ".join(wardrobe_phrases))
+        phrase = " ".join(fragment for fragment in fragments if fragment).strip(", ")
+        return phrase or "character portrait"
+
+    def _select_categories(
+        self,
+        attrs: Dict[str, Set[str]],
+        preset: str,
+        rng: random.Random,
+        variation: float,
+    ) -> Dict[str, List[str]]:
         config = PRESET_RULES[preset]
+        variability = max(0.0, min(1.0, variation))
         selected: Dict[str, List[str]] = {}
         for category, tags in attrs.items():
             if category not in config or not tags:
@@ -489,24 +564,37 @@ class PonyPromptConverter:
             min_required = min(int(rule.get("min", 0)), max_allowed)
             if max_allowed <= 0:
                 continue
-            if min_required == 0 and rng.random() > rule.get("prob", 0.5):
+            base_prob = rule.get("prob", 1.0 if min_required > 0 else 0.5)
+            adjusted_prob = max(0.0, min(1.0, base_prob + (variability - 0.5) * 0.6))
+            if min_required == 0 and rng.random() > adjusted_prob:
                 continue
-            if max_allowed < min_required:
-                max_allowed = min_required
+            span = max_allowed - min_required
             count = min_required
-            if max_allowed > min_required:
-                count = rng.randint(min_required, max_allowed)
+            if span > 0:
+                span_limit = max(0, int(round(span * variability)))
+                span_limit = min(span, span_limit)
+                if span_limit > 0:
+                    count = min_required + rng.randint(0, span_limit)
+            if count == 0 and min_required > 0:
+                count = min_required
             if count == 0:
                 continue
             selected[category] = available[:count]
         return selected
-    def _assemble_tags(self, selected: Dict[str, List[str]], preset: str, extra: Sequence[str], rng: random.Random) -> List[str]:
+    def _assemble_tags(
+        self,
+        selected: Dict[str, List[str]],
+        preset: str,
+        extra: Sequence[str],
+        rng: random.Random,
+        variation: float,
+    ) -> List[str]:
         categories = list(selected.keys())
         if "subject" in categories:
             categories.remove("subject")
             categories.insert(0, "subject")
         rng.shuffle(categories[1:])
-        ordered: List[str] = []
+        ordered: List[Tuple[str, str]] = []
         seen: Set[str] = set()
         for category in categories:
             tags = selected[category]
@@ -514,28 +602,57 @@ class PonyPromptConverter:
             for tag in tags:
                 formatted = _format_tag(tag)
                 if formatted not in seen:
-                    ordered.append(formatted)
+                    ordered.append((category, formatted))
                     seen.add(formatted)
         flair = list(FLAIR_TAG_POOL.get(preset, ()))
         rng.shuffle(flair)
-        flair_count = 0
-        if preset == "heavy":
-            flair_count = rng.randint(1, min(3, len(flair))) if flair else 0
-        elif preset == "balanced" and rng.random() < 0.7:
-            flair_count = 1 if flair else 0
-        elif preset == "light" and rng.random() < 0.4:
-            flair_count = 1 if flair else 0
-        for tag in flair[:flair_count]:
-            formatted = _format_tag(tag)
-            if formatted not in seen:
-                ordered.append(formatted)
-                seen.add(formatted)
+        variability = max(0.0, min(1.0, variation))
+        if flair:
+            flair_cap = int(round(len(flair) * max(0.0, variability - 0.2)))
+            if preset == "light":
+                flair_cap = min(flair_cap, 1)
+            elif preset == "balanced":
+                flair_cap = min(flair_cap, 2)
+            else:
+                flair_cap = min(flair_cap, len(flair))
+            if flair_cap > 0:
+                flair_count = rng.randint(0, flair_cap)
+                for tag in flair[:flair_count]:
+                    formatted = _format_tag(tag)
+                    if formatted not in seen:
+                        ordered.append(("flair", formatted))
+                        seen.add(formatted)
         for tag in extra:
             formatted = _format_tag(tag)
             if formatted not in seen:
-                ordered.append(formatted)
+                ordered.append(("extra", formatted))
                 seen.add(formatted)
-        return ordered
+        final_tags: List[str] = []
+        final_seen: Set[str] = set()
+        for category, tag in ordered:
+            if category == "subject":
+                final_tags.append(tag)
+                final_seen.add(tag)
+                continue
+            drop_chance = 0.0
+            if variability < 0.5:
+                drop_chance = (0.5 - variability) * 0.45
+            if drop_chance > 0 and rng.random() < drop_chance:
+                continue
+            if tag not in final_seen:
+                final_tags.append(tag)
+                final_seen.add(tag)
+        if variability > 0.75:
+            extras = [tag for _, tag in ordered if tag not in final_seen]
+            rng.shuffle(extras)
+            if extras:
+                add_cap = min(len(extras), 1 + int(round((variability - 0.75) * len(extras))))
+                add_count = rng.randint(0, add_cap)
+                for tag in extras[:add_count]:
+                    if tag not in final_seen:
+                        final_tags.append(tag)
+                        final_seen.add(tag)
+        return final_tags
 
     def convert(
         self,
@@ -544,47 +661,115 @@ class PonyPromptConverter:
         extra_tags: Sequence[str] | None = None,
         preset: str = "balanced",
         seed: int | None = None,
+        variation: float = 0.5,
     ) -> ConversionResult:
-        normalized = _normalize(text)
-        attrs: Dict[str, Set[str]] = {}
-        subject_tags, count, gender = self._subject_tags(normalized)
-        attrs.setdefault("subject", set()).update(subject_tags)
-        for rules in (SPECIES_RULES, POSE_RULES, SETTING_RULES, WARDROBE_RULES, LIGHTING_RULES, MOOD_RULES):
-            matches = _collect_rules(normalized, rules)
-            for category, tags in matches.items():
-                attrs.setdefault(category, set()).update(tags)
-        self._apply_descriptors(normalized, attrs)
-        attrs.setdefault("quality", set()).update(QUALITY_STYLES.get(quality_style, QUALITY_STYLES["balanced"]))
-        rng = self._rng(seed)
         preset_key = preset if preset in PRESET_RULES else "balanced"
-        adjectives = self._choose_adjectives(attrs, rng, preset_key)
-        noun = self._base_noun(attrs, count, gender)
-        pose_phrase = self._phrase(POSE_PHRASES, attrs.get("pose", set()), rng)
-        setting_phrase = self._phrase(SETTING_PHRASES, attrs.get("setting", set()) | attrs.get("lighting", set()), rng)
-        wardrobe_phrases = self._wardrobe_phrase(attrs, rng)
-        fragments: List[str] = []
-        if adjectives:
-            fragments.append(" ".join(adjectives))
-        fragments.append(noun)
-        if pose_phrase:
-            fragments.append(pose_phrase)
-        if setting_phrase:
-            fragments.append(setting_phrase)
-        if wardrobe_phrases:
-            fragments.append(", ".join(wardrobe_phrases))
-        subject_phrase = " ".join(fragments).strip(", ") or "character portrait"
-        selected = self._select_categories(attrs, preset_key, rng)
+        segments = _split_into_segments(text)
+        aggregated_attrs: Dict[str, Set[str]] = {}
+        segment_attrs: List[Tuple[Dict[str, Set[str]], int, str]] = []
+        subject_counts: List[int] = []
+        gender_votes: Counter[str] = Counter()
+
+        for segment in segments:
+            normalized_segment = _normalize(segment)
+            if not normalized_segment:
+                continue
+            attrs, count, gender = self._collect_segment_attributes(normalized_segment)
+            if not attrs:
+                continue
+            segment_attrs.append((attrs, count, gender))
+            for category, tags in attrs.items():
+                aggregated_attrs.setdefault(category, set()).update(tags)
+            subject_counts.append(count)
+            gender_votes[gender] += 1
+
+        if not segment_attrs:
+            normalized = _normalize(text)
+            attrs, count, gender = self._collect_segment_attributes(normalized)
+            segment_attrs.append((attrs, count, gender))
+            for category, tags in attrs.items():
+                aggregated_attrs.setdefault(category, set()).update(tags)
+            subject_counts.append(count)
+            gender_votes[gender] += 1
+
+        subject_count = max(subject_counts) if subject_counts else 1
+
+        gender = "unknown"
+        if gender_votes:
+            sorted_votes = sorted(
+                gender_votes.items(),
+                key=lambda item: (item[0] == "unknown", -item[1]),
+            )
+            if sorted_votes:
+                gender = sorted_votes[0][0]
+
+        if "subject" not in aggregated_attrs:
+            aggregated_attrs["subject"] = {"solo"}
+
+        subject_tags_set = aggregated_attrs.setdefault("subject", set())
+        if subject_count > 1:
+            subject_tags_set.discard("solo")
+            if subject_count == 2:
+                subject_tags_set.add("duo")
+            elif subject_count == 3:
+                subject_tags_set.add("trio")
+                subject_tags_set.add("group")
+            elif subject_count >= 4:
+                subject_tags_set.add("group")
+        else:
+            subject_tags_set.add("solo")
+            if gender == "female":
+                subject_tags_set.add("1girl")
+            elif gender == "male":
+                subject_tags_set.add("1boy")
+
+        aggregated_attrs.setdefault("quality", set()).update(
+            QUALITY_STYLES.get(quality_style, QUALITY_STYLES["balanced"])
+        )
+
+        rng = self._rng(seed)
+        subject_phrase = self._build_subject_phrase(
+            aggregated_attrs,
+            subject_count,
+            gender,
+            rng,
+            preset_key,
+        )
+
+        if len(segment_attrs) > 1:
+            extra_settings: List[str] = []
+            for attrs, _, _ in segment_attrs:
+                extra_phrase = self._phrase(SETTING_PHRASES, attrs.get("setting", set()), rng)
+                if extra_phrase and extra_phrase not in extra_settings and extra_phrase not in subject_phrase:
+                    extra_settings.append(extra_phrase)
+            if extra_settings and rng.random() < 0.7:
+                subject_phrase = f"{subject_phrase}, {rng.choice(extra_settings)}"
+
+        variation = max(0.0, min(1.0, variation))
+        selected = self._select_categories(aggregated_attrs, preset_key, rng, variation)
         extra = list(extra_tags) if extra_tags else []
-        ordered_tags = self._assemble_tags(selected, preset_key, extra, rng)
+        ordered_tags = self._assemble_tags(selected, preset_key, extra, rng, variation)
+
+        if subject_count == 2 and "duo" not in ordered_tags:
+            ordered_tags.insert(0, "duo")
+        elif subject_count == 3:
+            if "trio" not in ordered_tags:
+                ordered_tags.insert(0, "trio")
+            if "group" not in ordered_tags:
+                ordered_tags.insert(1 if len(ordered_tags) > 0 else 0, "group")
+        elif subject_count >= 4 and "group" not in ordered_tags:
+            ordered_tags.insert(0, "group")
+
         parts = list(SCORE_TAGS)
         parts.append(subject_phrase)
         parts.extend(ordered_tags)
         prompt = ", ".join(parts)
+
         return ConversionResult(
             prompt=prompt,
             subject_phrase=subject_phrase,
             ordered_tags=ordered_tags,
-            subject_count=count,
+            subject_count=subject_count,
             inferred_gender=gender,
             applied_style=quality_style,
             prompt_weight=preset_key,
@@ -596,6 +781,7 @@ def _generate_preview(
     prompt_text: str,
     quality_style: str,
     preset_key: str,
+    variation_amount: float,
     extra_tags: str,
     include_negative: bool,
     seed_value: int | None = None,
@@ -610,12 +796,14 @@ def _generate_preview(
         extra_tags=extra,
         preset=preset_key,
         seed=seed_value,
-    )
-    meta = (
-        f"Subjects: {result.subject_count} | Gender: {result.inferred_gender} | "
-        f"Preset: {result.prompt_weight} | Style: {result.applied_style}"
+        variation=variation_amount,
     )
     negative = DEFAULT_NEGATIVE if include_negative else ""
+    meta = (
+        f"Subjects: {result.subject_count} | Gender: {result.inferred_gender} | "
+        f"Preset: {result.prompt_weight} | Style: {result.applied_style} | "
+        f"Variation: {variation_amount:.2f}"
+    )
     return result.prompt, negative, meta
 
 
@@ -643,6 +831,13 @@ class Script(scripts.Script):
                 label="Prompt weight",
                 choices=list(PRESET_RULES.keys()),
                 value="balanced",
+            )
+            variation_slider = gr.Slider(
+                label="Variation",
+                minimum=0.0,
+                maximum=1.0,
+                step=0.05,
+                value=0.5,
             )
             extra_tags_box = gr.Textbox(
                 label="Extra tags (comma separated)",
@@ -683,6 +878,7 @@ class Script(scripts.Script):
                 override_prompt,
                 quality_style,
                 preset_radio,
+                variation_slider,
                 extra_tags_box,
                 negative_checkbox,
                 seed_slider,
@@ -690,8 +886,14 @@ class Script(scripts.Script):
             ]
 
             regen_button.click(
-                lambda text, style, preset, extra, neg, seed, lock: _generate_preview(
-                    text, style, preset, extra, neg, _seed(seed, lock)
+                lambda text, style, preset, variation, extra, neg, seed, lock: _generate_preview(
+                    text,
+                    style,
+                    preset,
+                    variation,
+                    extra,
+                    neg,
+                    _seed(seed, lock),
                 ),
                 inputs=inputs,
                 outputs=[preview_box, negative_box, meta_box],
@@ -702,6 +904,7 @@ class Script(scripts.Script):
             override_prompt,
             quality_style,
             preset_radio,
+            variation_slider,
             extra_tags_box,
             negative_checkbox,
         ]
@@ -713,6 +916,7 @@ class Script(scripts.Script):
         override_prompt: str,
         quality_style: str,
         preset_key: str,
+        variation_amount: float,
         extra_tags: str,
         auto_negative: bool,
     ) -> None:
@@ -725,6 +929,7 @@ class Script(scripts.Script):
             quality_style=quality_style,
             extra_tags=extra,
             preset=preset_key,
+            variation=variation_amount,
         )
         p.prompt = result.prompt
         if hasattr(p, "all_prompts") and p.all_prompts:
@@ -741,6 +946,7 @@ class Script(scripts.Script):
                     "pony_prompt_subjects": result.subject_count,
                     "pony_prompt_gender": result.inferred_gender,
                     "pony_prompt_weight": result.prompt_weight,
+                    "pony_prompt_variation": round(variation_amount, 2),
                 }
             )
 
@@ -751,6 +957,7 @@ class Script(scripts.Script):
         override_prompt: str,
         quality_style: str,
         preset_key: str,
+        variation_amount: float,
         extra_tags: str,
         auto_negative: bool,
     ):
