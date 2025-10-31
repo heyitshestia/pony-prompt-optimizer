@@ -60,9 +60,6 @@ SCORE_TAGS: Tuple[str, ...] = (
     "score_9",
     "score_8_up",
     "score_7_up",
-    "score_6_up",
-    "score_5_up",
-    "score_4_up",
 )
 
 QUALITY_STYLES: Dict[str, Sequence[str]] = {
@@ -158,6 +155,11 @@ WARDROBE_RULES = [
     ("wardrobe", ("armor",), ("armor",)),
     ("wardrobe", ("jacket", "coat"), ("jacket",)),
     ("wardrobe", ("boots", "boot"), ("boots",)),
+    ("wardrobe", ("crop top", "cropped top"), ("crop_top",)),
+    ("wardrobe", ("shorts",), ("shorts",)),
+    ("wardrobe", ("pants", "yoga pants", "leggings"), ("pants",)),
+    ("wardrobe", ("panties",), ("panties",)),
+    ("wardrobe", ("thighhighs", "thigh highs", "thigh-highs"), ("thighhighs",)),
     ("wardrobe", ("lingerie", "underwear"), ("lingerie",)),
     ("wardrobe", ("maid", "maid outfit"), ("maid_outfit",)),
     ("wardrobe", ("suit",), ("suit",)),
@@ -234,8 +236,14 @@ WARDROBE_PHRASES = {
     "armor": ("wearing sleek armor", "armored for battle"),
     "jacket": ("wearing a stylish jacket", "layered with a jacket"),
     "boots": ("with tall boots", "wearing chunky boots"),
+    "crop_top": ("wearing a crop top", "in a cropped top"),
+    "shorts": ("wearing shorts", "in fitted shorts"),
+    "pants": ("wearing fitted pants", "in casual pants"),
+    "yoga_pants": ("wearing yoga pants", "in tight yoga pants"),
     "lingerie": ("wearing delicate lingerie", "in revealing lingerie"),
     "maid_outfit": ("wearing a cute maid outfit", "in a classic maid uniform"),
+    "panties": ("wearing panties",),
+    "thighhighs": ("with thighhighs", "wearing thigh-high socks"),
     "suit": ("dressed in a sharp suit", "wearing a tailored suit"),
 }
 
@@ -260,9 +268,14 @@ PRESET_RULES: Dict[str, Dict[str, Dict[str, float]]] = {
         "traits": {"min": 0, "max": 1, "prob": 0.5},
         "body": {"min": 0, "max": 1, "prob": 0.5},
         "pose": {"min": 1, "max": 1},
+        "composition": {"min": 0, "max": 1, "prob": 0.5},
+        "gaze": {"min": 0, "max": 1, "prob": 0.6},
+        "camera": {"min": 0, "max": 1, "prob": 0.5},
         "setting": {"min": 0, "max": 1, "prob": 0.6},
         "wardrobe": {"min": 1, "max": 2},
         "accessory": {"min": 0, "max": 1, "prob": 0.4},
+        "color": {"min": 0, "max": 1, "prob": 0.6},
+        "props": {"min": 0, "max": 1, "prob": 0.6},
         "lighting": {"min": 0, "max": 1, "prob": 0.4},
         "mood": {"min": 0, "max": 1, "prob": 0.4},
         "quality": {"min": 1, "max": 2},
@@ -273,9 +286,14 @@ PRESET_RULES: Dict[str, Dict[str, Dict[str, float]]] = {
         "traits": {"min": 1, "max": 2},
         "body": {"min": 0, "max": 1, "prob": 0.6},
         "pose": {"min": 1, "max": 2},
+        "composition": {"min": 0, "max": 2, "prob": 0.7},
+        "gaze": {"min": 0, "max": 1, "prob": 0.7},
+        "camera": {"min": 0, "max": 1, "prob": 0.6},
         "setting": {"min": 1, "max": 2},
         "wardrobe": {"min": 1, "max": 3},
         "accessory": {"min": 0, "max": 2, "prob": 0.6},
+        "color": {"min": 0, "max": 2, "prob": 0.7},
+        "props": {"min": 0, "max": 2, "prob": 0.6},
         "lighting": {"min": 0, "max": 2, "prob": 0.7},
         "mood": {"min": 0, "max": 1, "prob": 0.7},
         "quality": {"min": 2, "max": 3},
@@ -286,15 +304,149 @@ PRESET_RULES: Dict[str, Dict[str, Dict[str, float]]] = {
         "traits": {"min": 1, "max": 3},
         "body": {"min": 1, "max": 2},
         "pose": {"min": 1, "max": 2},
+        "composition": {"min": 1, "max": 3},
+        "gaze": {"min": 0, "max": 2, "prob": 0.8},
+        "camera": {"min": 0, "max": 2, "prob": 0.7},
         "setting": {"min": 1, "max": 3},
         "wardrobe": {"min": 2, "max": 4},
         "accessory": {"min": 1, "max": 2},
+        "color": {"min": 1, "max": 3},
+        "props": {"min": 0, "max": 3, "prob": 0.7},
         "lighting": {"min": 1, "max": 2},
         "mood": {"min": 1, "max": 2},
         "quality": {"min": 3, "max": 4},
     },
 }
 
+
+COLOR_WORDS = {
+    "light blue": "light_blue",
+    "dark blue": "dark_blue",
+    "sky blue": "sky_blue",
+    "baby blue": "baby_blue",
+    "midnight blue": "midnight_blue",
+    "navy": "navy",
+    "blue": "blue",
+    "hot pink": "hot_pink",
+    "pink": "pink",
+    "magenta": "magenta",
+    "purple": "purple",
+    "lavender": "lavender",
+    "red": "red",
+    "crimson": "crimson",
+    "orange": "orange",
+    "gold": "gold",
+    "golden": "golden",
+    "yellow": "yellow",
+    "green": "green",
+    "emerald": "emerald",
+    "teal": "teal",
+    "turquoise": "turquoise",
+    "white": "white",
+    "cream": "cream",
+    "ivory": "ivory",
+    "black": "black",
+    "charcoal": "charcoal",
+    "silver": "silver",
+    "gray": "gray",
+    "grey": "grey",
+    "brown": "brown",
+    "beige": "beige",
+}
+
+CLOTHING_KEYWORDS = {
+    "crop top": "crop_top",
+    "cropped top": "crop_top",
+    "top": "top",
+    "shirt": "shirt",
+    "blouse": "blouse",
+    "shorts": "shorts",
+    "skirt": "skirt",
+    "pants": "pants",
+    "yoga pants": "yoga_pants",
+    "leggings": "leggings",
+    "jeans": "jeans",
+    "jacket": "jacket",
+    "coat": "coat",
+    "hoodie": "hoodie",
+    "sweater": "sweater",
+    "boots": "boots",
+    "sneakers": "sneakers",
+    "sandals": "sandals",
+    "panties": "panties",
+    "lingerie": "lingerie",
+    "thighhighs": "thighhighs",
+}
+
+LIGHTING_PATTERNS = [
+    (re.compile(r"\bsoft dawn light\b"), ("dawn_light", "soft_lighting")),
+    (re.compile(r"\bdawn\b"), ("dawn_light",)),
+    (re.compile(r"\bsunrise\b"), ("sunrise_light", "warm_lighting")),
+    (re.compile(r"\bwindow light\b"), ("window_light",)),
+    (re.compile(r"\bthrough (?:the|a) window\b"), ("window_light", "soft_lighting")),
+    (re.compile(r"\bneon light[s]?\b"), ("neon_light", "vivid_colors")),
+    (re.compile(r"\bgodrays\b"), ("godrays", "dramatic_lighting")),
+    (re.compile(r"\bsoft (?:morning|dawn) light\b"), ("soft_lighting", "dawn_light")),
+]
+
+GAZE_PATTERNS = [
+    (re.compile(r"\blooking up at the viewer\b"), ("looking_up_at_viewer", "eye_contact")),
+    (re.compile(r"\blooks up at the viewer\b"), ("looking_up_at_viewer", "eye_contact")),
+    (re.compile(r"\blooking at the viewer\b"), ("looking_at_viewer", "eye_contact")),
+    (re.compile(r"\blooks at the viewer\b"), ("looking_at_viewer", "eye_contact")),
+    (re.compile(r"\blooking down\b"), ("looking_down",)),
+    (re.compile(r"\bface close up\b"), ("face_close_up", "close_up")),
+    (re.compile(r"\bfrontal view\b"), ("frontal_view",)),
+    (re.compile(r"\bportrait from the side\b"), ("side_profile",)),
+    (re.compile(r"\bfrom below\b"), ("from_below", "dynamic_angle")),
+]
+
+CAMERA_PATTERNS = [
+    (re.compile(r"\bbutt[- ]shot\b"), ("butt_shot", "low_angle")),
+    (re.compile(r"\bdynamic angle\b"), ("dynamic_angle",)),
+    (re.compile(r"\bhalf ?body\b"), ("half_body",)),
+    (re.compile(r"\bclose up\b"), ("close_up",)),
+    (re.compile(r"\bshot from the side\b"), ("side_view",)),
+]
+
+COMPOSITION_PATTERNS = [
+    (re.compile(r"\bon the edge of (?:the )?bed\b"), ("edge_of_bed",)),
+    (re.compile(r"\bsitting on the edge\b"), ("edge_of_bed",)),
+    (re.compile(r"\bedge of (?:the |her |his )?bed\b"), ("edge_of_bed",)),
+    (re.compile(r"\blift skirt\b"), ("lift_skirt",)),
+    (re.compile(r"\bupskirt\b"), ("upskirt",)),
+    (re.compile(r"\bstanding up\b"), ("standing_pose",)),
+]
+
+TRAIT_PATTERNS = [
+    (re.compile(r"\bcute smile\b"), ("cute_smile", "smiling")),
+    (re.compile(r"\bsquinted eyes\b"), ("squinting",)),
+    (re.compile(r"\bgorgeous girl\b"), ("gorgeous",)),
+    (re.compile(r"\bkawaii girl\b"), ("kawaii",)),
+]
+
+PROP_PATTERNS = [
+    (re.compile(r"\bplants\b"), ("plants",)),
+    (re.compile(r"\bwindows?\b"), ("windows",)),
+    (re.compile(r"\bwhite walls\b"), ("white_walls",)),
+    (re.compile(r"\bpolaroid photo\b"), ("polaroid_photo",)),
+    (re.compile(r"\bretro aesthetic\b"), ("retro_aesthetic",)),
+    (re.compile(r"\bbed\b"), ("bed",)),
+]
+
+
+def _compile_colored_clothing_patterns() -> List[Tuple[re.Pattern, str, str]]:
+    patterns: List[Tuple[re.Pattern, str, str]] = []
+    color_items = sorted(COLOR_WORDS.items(), key=lambda item: -len(item[0]))
+    clothing_items = sorted(CLOTHING_KEYWORDS.items(), key=lambda item: -len(item[0]))
+    for color_text, color_tag in color_items:
+        for phrase, clothing_tag in clothing_items:
+            pattern = re.compile(rf"\b{re.escape(color_text)}\s+{re.escape(phrase)}\b")
+            patterns.append((pattern, color_tag, clothing_tag))
+    return patterns
+
+
+COLORED_CLOTHING_PATTERNS = _compile_colored_clothing_patterns()
 
 def _split_into_segments(text: str) -> List[str]:
     segments = [
@@ -373,6 +525,49 @@ def _collect_rules(text: str, rules: Sequence[Tuple[str, Sequence[str], Sequence
         if _matches_any(text, _compile_keywords(keywords)):
             found.setdefault(category, set()).update(tags)
     return found
+
+
+def _enrich_attributes_with_freeform(text: str, attrs: Dict[str, Set[str]]) -> None:
+    lowered = text.lower()
+
+    for pattern, tags in LIGHTING_PATTERNS:
+        if pattern.search(lowered):
+            attrs.setdefault("lighting", set()).update(tags)
+
+    for pattern, tags in GAZE_PATTERNS:
+        if pattern.search(lowered):
+            attrs.setdefault("gaze", set()).update(tags)
+            attrs.setdefault("traits", set()).update(tags)
+
+    for pattern, tags in CAMERA_PATTERNS:
+        if pattern.search(lowered):
+            attrs.setdefault("camera", set()).update(tags)
+
+    for pattern, tags in COMPOSITION_PATTERNS:
+        if pattern.search(lowered):
+            attrs.setdefault("composition", set()).update(tags)
+
+    for pattern, tags in TRAIT_PATTERNS:
+        if pattern.search(lowered):
+            attrs.setdefault("traits", set()).update(tags)
+
+    for pattern, tags in PROP_PATTERNS:
+        if pattern.search(lowered):
+            attrs.setdefault("props", set()).update(tags)
+            attrs.setdefault("setting", set()).update(tags)
+
+    for color_text, color_tag in sorted(COLOR_WORDS.items(), key=lambda item: -len(item[0])):
+        if re.search(rf"\b{re.escape(color_text)}\b", lowered):
+            attrs.setdefault("color", set()).add(color_tag)
+        if re.search(rf"\b{re.escape(color_text)}\s+background\b", lowered):
+            attrs.setdefault("setting", set()).add(f"{color_tag}_background")
+
+    for pattern, color_tag, clothing_tag in COLORED_CLOTHING_PATTERNS:
+        if pattern.search(lowered):
+            wardrobe_set = attrs.setdefault("wardrobe", set())
+            wardrobe_set.add(clothing_tag)
+            wardrobe_set.add(f"{color_tag}_{clothing_tag}")
+            attrs.setdefault("color", set()).add(color_tag)
 
 
 @dataclass
@@ -506,6 +701,9 @@ class PonyPromptConverter:
             phrase = self._phrase(WARDROBE_PHRASES, {tag}, rng)
             if phrase:
                 result.append(phrase)
+            elif "_" in tag:
+                friendly = tag.replace("_", " ")
+                result.append(f"wearing {friendly}")
         accessories = list(attrs.get("accessory", set()))
         rng.shuffle(accessories)
         for tag in accessories:
@@ -692,6 +890,8 @@ class PonyPromptConverter:
             subject_counts.append(count)
             gender_votes[gender] += 1
 
+        _enrich_attributes_with_freeform(text, aggregated_attrs)
+
         subject_count = max(subject_counts) if subject_counts else 1
 
         gender = "unknown"
@@ -759,6 +959,18 @@ class PonyPromptConverter:
                 ordered_tags.insert(1 if len(ordered_tags) > 0 else 0, "group")
         elif subject_count >= 4 and "group" not in ordered_tags:
             ordered_tags.insert(0, "group")
+
+        priority_tags: List[str] = []
+        priority_tags.extend(tag for tag in aggregated_attrs.get("wardrobe", set()) if "_" in tag)
+        priority_tags.extend(aggregated_attrs.get("gaze", set()))
+        priority_tags.extend(aggregated_attrs.get("lighting", set()))
+        priority_tags.extend(aggregated_attrs.get("props", set()))
+        priority_tags.extend(aggregated_attrs.get("color", set()))
+
+        for tag in priority_tags:
+            formatted = _format_tag(tag)
+            if formatted not in ordered_tags:
+                ordered_tags.insert(0, formatted)
 
         parts = list(SCORE_TAGS)
         parts.append(subject_phrase)

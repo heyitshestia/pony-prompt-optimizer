@@ -7,7 +7,7 @@ An Automatic1111/Forge extension that rewrites natural language descriptions int
 - Replaces the raw sentence with a curated pony prompt (no original text leakage).
 - Three density presets (**light**, **balanced**, **heavy**) that control how many tags and flourishes are injected.
 - Synonym and flair pools keep prompts fresh—click **Regenerate** to cycle new variants.
-- Multi-sentence descriptions are analyzed sentence-by-sentence so characters, outfits, and settings merge cleanly without duplicate tags.
+- Multi-sentence descriptions are analyzed sentence-by-sentence; clothing colors, gaze, lighting, and props are captured so composition carries forward without duplicate tags.
 - Variation slider lets you tighten or loosen the prompt length and optional flair tags.
 - Push button copies the preview straight into the active prompt textbox (txt2img/img2img).
 - Optional quality styles (balanced, dreamy, dramatic, vibrant, minimal) and auto negative prompt fill.
